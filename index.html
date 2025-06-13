@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+<link rel="manifest" href="manifest.json" />
   <meta charset="UTF-8">
   <title>LTE 신호 분석/경로/타임라인/추천/PDF 뷰어</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -658,6 +659,11 @@
       }
     }
 
+// service-worker.js (예시)
+self.addEventListener('install', function(event) {
+  // 캐싱 등 초기화 작업
+});
+
     // 추천 알고리즘: Excellent 합산 > Good 합산 > Poor 적은 순
     function recommendDevice(statTable) {
       let scores = {};
@@ -687,6 +693,10 @@
       const deviceName = `${top[0]} (${deviceCarrierMap[top[0]]})`;
       return {deviceName, reason};
     }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js');
+  }
   </script>
 </body>
 </html>
