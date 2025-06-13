@@ -1,30 +1,31 @@
 import json
 import random
 import datetime
+import math
 
 # 이동 경로 (시작점, 종료점)
 start_lat, start_lng = 34.9481, 127.4866
 end_lat, end_lng = 34.9500, 127.5300  # 예시: 북동쪽으로 약 250m 이동
 
-# 등급표 기준 중심값 (첨부 이미지 기준)
+# 등급표 기준 중심값
 base_config = {
     "Device1": {  # Excellent 중심
-        "RSSI": -60,    # > -65
-        "RSRP": -80,    # > -84
-        "SINR": 20,     # > 12.5
-        "RSRQ": -4      # > -5
+        "RSSI": -60,
+        "RSRP": -80,
+        "SINR": 20,
+        "RSRQ": -4
     },
     "Device2": {  # Good 중심
-        "RSSI": -70,    # -65 ~ -75
-        "RSRP": -93,    # -85 ~ -102
-        "SINR": 11,     # 10 ~ 12.5
-        "RSRQ": -7      # -9 ~ -5
+        "RSSI": -70,
+        "RSRP": -93,
+        "SINR": 11,
+        "RSRQ": -7
     },
     "Device3": {  # Fair 중심
-        "RSSI": -80,    # -75 ~ -85
-        "RSRP": -107,   # -103 ~ -111
-        "SINR": 8.5,    # 7 ~ 10
-        "RSRQ": -10.5   # -12 ~ -9
+        "RSSI": -80,
+        "RSRP": -107,
+        "SINR": 8.5,
+        "RSRQ": -10.5
     }
 }
 
@@ -47,15 +48,30 @@ def generate_signal_data(base, timestamp, lat, lng):
         "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S')
     }
 
+def create_wobbly_path(start_lat, start_lng, end_lat, end_lng, n_points, wobble=0.0002):
+    """구불구불한 경로 생성"""
+    path = []
+    for i in range(n_points):
+        ratio = i / (n_points - 1)
+        # 기본 선형 보간
+        base_lat = interpolate(start_lat, end_lat, ratio)
+        base_lng = interpolate(start_lng, end_lng, ratio)
+        # 랜덤성 추가 (wobble: 진폭)
+        lat = base_lat + random.uniform(-wobble, wobble)
+        lng = base_lng + random.uniform(-wobble, wobble)
+        path.append((lat, lng))
+    return path
+
 def create_dataset():
     devices = ["Device1", "Device2", "Device3"]
     carriers = ["KT", "SKT", "U+"]
     dataset = {device: {carrier: [] for carrier in carriers} for device in devices}
 
+    # 구불구불한 경로 생성
+    path = create_wobbly_path(start_lat, start_lng, end_lat, end_lng, num_points, wobble=0.0002)
+
     for i in range(num_points):
-        ratio = i / (num_points - 1)
-        lat = interpolate(start_lat, end_lat, ratio)
-        lng = interpolate(start_lng, end_lng, ratio)
+        lat, lng = path[i]
         measure_time = start_time + datetime.timedelta(seconds=10*i)
         signals = {dev: generate_signal_data(base_config[dev], measure_time, lat, lng) for dev in devices}
 
@@ -78,11 +94,3 @@ def create_dataset():
 # JSON 파일로 저장
 with open("jntp_lte_signal_data_latest.json", "w", encoding="utf-8") as f:
     json.dump(create_dataset(), f, indent=2, ensure_ascii=False)
-
-"""
-- 등급 구간은 첨부 표(두 이미지)와 완전 일치
-- Device1: Excellent, Device2: Good, Device3: Fair 중심
-- ±3dB 출렁임, 12% 확률 역전, 10분간 10초 간격(60개)
-- 선형 이동(시작~종료점), 각 계측마다 같은 위치에서 기록
-- timestamp 포함, JSON 구조 완벽 호환
-"""
