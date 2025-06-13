@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>JSON 배치 샘플링(간격별 대표값 추출) 및 파일명 자동 변환</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Noto Sans KR', Arial, sans-serif; background: #f7f7fa; }
+    .container { max-width: 600px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);}
+    h1 { margin-top: 0; }
+    .row { margin-bottom: 1.5rem; }
+    label { font-weight: bold; }
+    .btn { padding: 0.5em 1.5em; background: #2ecc40; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    .btn:disabled { background: #bbb; }
+    .result { margin-top: 1.5rem; }
+    .file-link { display: block; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>JSON 배치 샘플링 및 파일명 자동 변환</h1>
+    <div class="row">
+      <label>배치 샘플링 간격(분):</label>
+      <select id="intervalSelect">
+        <option value="1">1분</option>
+        <option value="5">5분</option>
+        <option value="10">10분</option>
+        <option value="30">30분</option>
+        <option value="60">60분</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>JSON 파일 업로드:</label>
+      <input type="file" id="jsonFile" accept=".json">
+    </div>
+    <div class="row">
+      <button class="btn" id="processBtn" disabled>배치 샘플링 및 파일명 변환 저장</button>
+    </div>
+    <div class="result" id="resultArea"></div>
+  </div>
+  <script>
+    let jsonData = null;
+    let fileName = "";
+
+    document.getElementById('jsonFile').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      fileName = file.name.replace(/\.json$/i, "");
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          jsonData = JSON.parse(evt.target.result);
+          document.getElementById('processBtn').disabled = false;
+        } catch (err) {
+          alert('JSON 파일 파싱 오류: ' + err.message);
+          jsonData = null;
+          document.getElementById('processBtn').disabled = true;
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    document.getElementById('processBtn').addEventListener('click', function() {
+      if (!jsonData) return;
+      const intervalMin = parseInt(document.getElementById('intervalSelect').value, 10);
+      const sampledData = batchSample(jsonData, intervalMin);
+      const resultArea = document.getElementById('resultArea');
+      resultArea.innerHTML = "";
+      const blob = new Blob([JSON.stringify(sampledData, null, 2)], {type: "application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${fileName}_${intervalMin}min_sampled.json`;
+      a.textContent = `저장: ${fileName}_${intervalMin}min_sampled.json`;
+      a.className = "file-link";
+      resultArea.appendChild(a);
+      if (Object.keys(sampledData).length === 0) {
+        resultArea.innerHTML = "<span style='color:#e74c3c;'>데이터가 없습니다.</span>";
+      }
+    });
+
+    // 각 디바이스/캐리어별로 intervalMin 단위로 대표값(첫 데이터)만 남김
+    function batchSample(data, intervalMin) {
+      let result = {};
+      Object.keys(data).forEach(device => {
+        result[device] = {};
+        Object.keys(data[device]).forEach(carrier => {
+          const arr = (data[device][carrier] || []).slice();
+          // timestamp 순 정렬
+          arr.sort((a,b) => new Date(a.timestamp.replace(/-/g,'/')) - new Date(b.timestamp.replace(/-/g,'/')));
+          let sampled = [];
+          let lastTime = null;
+          for (let i = 0; i < arr.length; i++) {
+            const t = new Date(arr[i].timestamp.replace(/-/g,'/'));
+            if (!lastTime || (t - lastTime) >= intervalMin*60*1000) {
+              sampled.push(arr[i]);
+              lastTime = t;
+            }
+          }
+          result[device][carrier] = sampled;
+        });
+      });
+      return result;
+    }
+  </script>
+</body>
+</html>

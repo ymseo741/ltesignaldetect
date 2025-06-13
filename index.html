@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>LTE 신호 분석/경로/타임라인/추천/PDF 뷰어</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Chart.js + time adapter -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
+  <!-- Leaflet.js -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <style>
+    body { font-family: 'Noto Sans KR', Arial, sans-serif; margin: 0; background: #f7f7fa; }
+    .container { max-width: 1200px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);}
+    h1 { margin-top: 0; }
+    .upload-section { display: flex; gap: 2rem; margin-bottom: 2rem; }
+    .map-section { margin-bottom: 2rem; }
+    #map { width: 100%; height: 400px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .timeline-section { margin: 2rem 0; }
+    .timeline-slider { width: 100%; }
+    .timeline-labels { display: flex; justify-content: space-between; font-size: 0.95em; color: #444; margin-top: 0.3rem; }
+    .timeline-controls { display: flex; align-items: center; gap: 1rem; justify-content: center; margin-bottom: 0.5rem; }
+    .play-btn, .pause-btn { border: none; background: #6fcf97; color: #fff; border-radius: 4px; padding: 0.4em 1.2em; font-size: 1.1em; cursor: pointer; }
+    .play-btn[disabled], .pause-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .chart-section { margin-bottom: 2rem; }
+    .charts-flex { display: flex; flex-wrap: wrap; gap: 2rem; }
+    .chart-block { flex: 1 1 400px; background: #f8fafc; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.03);}
+    .chart-block h3 { margin-top: 0; }
+    .stat-table, .criteria-table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+    .stat-table th, .stat-table td, .criteria-table th, .criteria-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    .stat-table th, .criteria-table th { background: #e8f4fd; }
+    .grade-Excellent { background: #2ecc40 !important; color:#fff !important; }
+    .grade-Good      { background: #f1c40f !important; color:#333 !important; }
+    .grade-Fair      { background: #ff9800 !important; color:#fff !important; }
+    .grade-Poor      { background: #e74c3c !important; color:#fff !important; }
+    .recommend-box { background: #eafaf1; border: 1.5px solid #6fcf97; border-radius: 8px; padding: 1rem; margin-bottom: 2rem; font-size: 1.1em; }
+    .pdf-section { margin-top: 2rem; }
+    .pdf-img-viewer { width: 100%; }
+    .pdf-img-viewer img { display: block; width: 100%; margin-bottom: 24px; background: #fff; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.07);}
+    @media (max-width: 900px) {
+      .container { padding: 1rem; }
+      #map { height: 250px; }
+      .charts-flex { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>LTE 신호 분석/경로/타임라인/추천/PDF 뷰어</h1>
+    <section class="upload-section">
+      <div>
+        <label for="jsonFile"><b>LTE 신호 JSON 업로드</b></label><br>
+        <input type="file" id="jsonFile" accept=".json">
+      </div>
+      <div>
+        <label for="pdfFile"><b>PDF 업로드</b></label><br>
+        <input type="file" id="pdfFile" accept="application/pdf">
+      </div>
+    </section>
+    <section class="map-section">
+      <h2>지도에서 위치/경로/애니메이션 보기 (일반지도 ↔ 위성지도 전환 가능)</h2>
+      <div id="map"></div>
+    </section>
+    <section class="timeline-section">
+      <h2>타임라인 (시점 이동)</h2>
+      <div class="timeline-controls">
+        <button id="playBtn" class="play-btn">재생</button>
+        <button id="pauseBtn" class="pause-btn" disabled>정지</button>
+        <span id="timelineLabel" style="color:#666;"></span>
+      </div>
+      <input type="range" id="timelineSlider" class="timeline-slider" min="0" max="0" value="0">
+      <div class="timeline-labels">
+        <span id="timelineStart"></span>
+        <span id="timelineMid"></span>
+        <span id="timelineEnd"></span>
+      </div>
+      <div id="timestampLabel" style="text-align:center; margin-top:0.5rem; color:#222; font-weight:bold;"></div>
+    </section>
+    <section class="chart-section">
+      <h2>지표별 시계열 그래프</h2>
+      <div class="charts-flex" id="chartsFlex">
+        <div class="chart-block"><h3>RSSI</h3><canvas id="chartRSSI" height="200"></canvas></div>
+        <div class="chart-block"><h3>RSRP</h3><canvas id="chartRSRP" height="200"></canvas></div>
+        <div class="chart-block"><h3>RSRQ</h3><canvas id="chartRSRQ" height="200"></canvas></div>
+        <div class="chart-block"><h3>SINR</h3><canvas id="chartSINR" height="200"></canvas></div>
+      </div>
+    </section>
+    <section>
+      <h2>신호 등급 분석 (평균, 등급별 카운트)</h2>
+      <div id="statArea"></div>
+      <div id="recommendBox" class="recommend-box" style="display:none;"></div>
+    </section>
+    <section>
+      <h2>신호 등급 기준표 (LTE 표준)</h2>
+      <table class="criteria-table">
+        <thead>
+          <tr>
+            <th>등급</th>
+            <th>RSSI (dBm)</th>
+            <th>RSRP (dBm)</th>
+            <th>RSRQ (dB)</th>
+            <th>SINR (dB)</th>
+            <th>색상</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Excellent</td>
+            <td>&gt; -65</td>
+            <td>&gt; -84</td>
+            <td>&gt; -5</td>
+            <td>&gt; 12.5</td>
+            <td class="grade-Excellent"></td>
+          </tr>
+          <tr>
+            <td>Good</td>
+            <td>-65 ~ -75</td>
+            <td>-85 ~ -102</td>
+            <td>-9 ~ -5</td>
+            <td>10 ~ 12.5</td>
+            <td class="grade-Good"></td>
+          </tr>
+          <tr>
+            <td>Fair</td>
+            <td>-75 ~ -85</td>
+            <td>-103 ~ -111</td>
+            <td>-12 ~ -9</td>
+            <td>7 ~ 10</td>
+            <td class="grade-Fair"></td>
+          </tr>
+          <tr>
+            <td>Poor</td>
+            <td>&lt; -85</td>
+            <td>&lt; -111</td>
+            <td>&lt; -12</td>
+            <td>&lt; 7</td>
+            <td class="grade-Poor"></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="pdf-section">
+      <h2>PDF 리포트 (전체 페이지 연속 보기)</h2>
+      <div class="pdf-img-viewer" id="pdfImgViewer"></div>
+    </section>
+  </div>
+  <script>
+    // 등급 기준(첨부 표 기반)
+    const gradeBands = {
+      RSSI: [
+        { grade: "Excellent", min: -65, max: 100, color: "#2ecc40" },
+        { grade: "Good",      min: -75, max: -65, color: "#f1c40f" },
+        { grade: "Fair",      min: -85, max: -75, color: "#ff9800" },
+        { grade: "Poor",      min: -200, max: -85, color: "#e74c3c" }
+      ],
+      RSRP: [
+        { grade: "Excellent", min: -84, max: 100, color: "#2ecc40" },
+        { grade: "Good",      min: -102, max: -84, color: "#f1c40f" },
+        { grade: "Fair",      min: -111, max: -102, color: "#ff9800" },
+        { grade: "Poor",      min: -200, max: -111, color: "#e74c3c" }
+      ],
+      RSRQ: [
+        { grade: "Excellent", min: -5, max: 100, color: "#2ecc40" },
+        { grade: "Good",      min: -9, max: -5, color: "#f1c40f" },
+        { grade: "Fair",      min: -12, max: -9, color: "#ff9800" },
+        { grade: "Poor",      min: -100, max: -12, color: "#e74c3c" }
+      ],
+      SINR: [
+        { grade: "Excellent", min: 12.5, max: 200, color: "#2ecc40" },
+        { grade: "Good",      min: 10, max: 12.5, color: "#f1c40f" },
+        { grade: "Fair",      min: 7, max: 10, color: "#ff9800" },
+        { grade: "Poor",      min: -100, max: 7, color: "#e74c3c" }
+      ]
+    };
+
+    function getSignalGrade(metric, value) {
+      if (metric === "RSSI") {
+        if (value > -65) return "Excellent";
+        if (value > -75) return "Good";
+        if (value > -85) return "Fair";
+        return "Poor";
+      }
+      if (metric === "RSRP") {
+        if (value > -84) return "Excellent";
+        if (value > -102) return "Good";
+        if (value > -111) return "Fair";
+        return "Poor";
+      }
+      if (metric === "RSRQ") {
+        if (value > -5) return "Excellent";
+        if (value > -9) return "Good";
+        if (value > -12) return "Fair";
+        return "Poor";
+      }
+      if (metric === "SINR") {
+        if (value > 12.5) return "Excellent";
+        if (value >= 10) return "Good";
+        if (value >= 7) return "Fair";
+        return "Poor";
+      }
+      return "Unknown";
+    }
+    function getGradeColor(metric, value) {
+      const bands = gradeBands[metric];
+      if (metric === "SINR") {
+        if (value > 12.5) return bands[0].color;
+        if (value >= 10) return bands[1].color;
+        if (value >= 7) return bands[2].color;
+        return bands[3].color;
+      }
+      if (metric === "RSSI") {
+        if (value > -65) return bands[0].color;
+        if (value > -75) return bands[1].color;
+        if (value > -85) return bands[2].color;
+        return bands[3].color;
+      }
+      if (metric === "RSRP") {
+        if (value > -84) return bands[0].color;
+        if (value > -102) return bands[1].color;
+        if (value > -111) return bands[2].color;
+        return bands[3].color;
+      }
+      if (metric === "RSRQ") {
+        if (value > -5) return bands[0].color;
+        if (value > -9) return bands[1].color;
+        if (value > -12) return bands[2].color;
+        return bands[3].color;
+      }
+      return "#888";
+    }
+
+    const deviceCarrierMap = { Device1: "KT", Device2: "SKT", Device3: "U+" };
+    const deviceColors = { Device1: "#007bff", Device2: "#27ae60", Device3: "#e67e22" };
+
+    // 지도 초기화 (일반지도 + 위성지도 레이어 컨트롤)
+    let map = L.map('map').setView([34.9481, 127.4866], 14);
+    
+    // 기본 타일 레이어
+    let osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap'
+    });
+    
+    // 위성 이미지 레이어 (Esri World Imagery)
+    let satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19, attribution: 'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+    });
+    
+    // 기본으로 일반지도 추가
+    osmLayer.addTo(map);
+    
+    // 레이어 컨트롤 (지도 타입 전환)
+    let baseLayers = {
+      "일반지도": osmLayer,
+      "위성지도": satelliteLayer
+    };
+    L.control.layers(baseLayers).addTo(map);
+    
+    let polylineLayers = {};
+    let markerLayers = {};
+
+    // Chart.js 객체 저장
+    let chartObjs = {};
+
+    // 타임라인 슬라이더/라벨
+    const timelineSlider = document.getElementById('timelineSlider');
+    const timelineLabel = document.getElementById('timelineLabel');
+    const timestampLabel = document.getElementById('timestampLabel');
+    const timelineStart = document.getElementById('timelineStart');
+    const timelineMid = document.getElementById('timelineMid');
+    const timelineEnd = document.getElementById('timelineEnd');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    let playTimer = null;
+
+    // PDF.js
+    document.getElementById('pdfFile').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.type !== "application/pdf") {
+        alert("PDF 파일만 업로드 가능합니다.");
+        return;
+      }
+      const fileReader = new FileReader();
+      fileReader.onload = function() {
+        renderPdfAsImages(new Uint8Array(fileReader.result));
+      };
+      fileReader.readAsArrayBuffer(file);
+    });
+
+    function renderPdfAsImages(pdfData) {
+      const container = document.getElementById('pdfImgViewer');
+      container.innerHTML = '<p style="text-align:center; color:#888;">PDF 변환 중...</p>';
+      pdfjsLib.getDocument({data: pdfData}).promise.then(function(pdf) {
+        container.innerHTML = '';
+        (async function() {
+          for (let i = 1; i <= pdf.numPages; i++) {
+            await pdf.getPage(i).then(function(page) {
+              const viewport = page.getViewport({scale: 1.2});
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const context = canvas.getContext('2d');
+              return page.render({canvasContext: context, viewport: viewport}).promise.then(function() {
+                const img = document.createElement('img');
+                img.src = canvas.toDataURL('image/jpeg', 1.0);
+                container.appendChild(img);
+              });
+            });
+          }
+        })();
+      }).catch(function(err) {
+        container.innerHTML = '<p style="text-align:center; color:#e53e3e;">PDF 파일을 불러올 수 없습니다.<br>' + err + '</p>';
+      });
+    }
+
+    let globalTimestamps = [];
+
+    document.getElementById('jsonFile').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const lteData = JSON.parse(evt.target.result);
+          setupMapAndTimeline(lteData);
+          drawAllCharts(lteData);
+          renderStatsAndRecommend(lteData);
+        } catch (err) {
+          alert('JSON 파일 파싱 오류: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function setupMapAndTimeline(lteData) {
+      Object.values(polylineLayers).forEach(l => map.removeLayer(l));
+      Object.values(markerLayers).forEach(l => map.removeLayer(l));
+      polylineLayers = {}; markerLayers = {};
+
+      let maxLen = 0;
+      let deviceTracks = {};
+      let allLatLngs = []; // 전체 경로 fitBounds용
+      
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        deviceTracks[device] = arr;
+        maxLen = Math.max(maxLen, arr.length);
+
+        // 경로(Polyline)
+        const latlngs = arr.map(d => [d.lat, d.lng]);
+        allLatLngs = allLatLngs.concat(latlngs); // 전체 좌표 누적
+        
+        if (latlngs.length > 1) {
+          const poly = L.polyline(latlngs, {color: deviceColors[device], weight: 4}).addTo(map);
+          polylineLayers[device] = poly;
+        }
+        // 현재 위치 마커
+        if (latlngs.length > 0) {
+          const marker = L.circleMarker(latlngs[0], {
+            radius: 9, color: "#222", fillColor: deviceColors[device], fillOpacity: 0.9, weight: 3
+          }).addTo(map).bindTooltip(device, {permanent:true, direction:'top'});
+          markerLayers[device] = marker;
+        }
+      });
+
+      // 전체 경로에 지도 맞춤 (fitBounds)
+      if (allLatLngs.length > 0) {
+        map.fitBounds(allLatLngs, {padding: [30, 30]});
+      }
+
+      // 타임라인 슬라이더/라벨
+      timelineSlider.max = maxLen-1;
+      timelineSlider.value = 0;
+
+      // 타임스탬프 배열 추출 (Device1 기준)
+      let arr = deviceTracks["Device1"];
+      globalTimestamps = arr.map(d => d.timestamp || "");
+
+      // 타임라인 라벨(시작/중간/끝)
+      if (globalTimestamps.length > 0) {
+        timelineStart.innerText = formatTimestamp(globalTimestamps[0]);
+        timelineMid.innerText = formatTimestamp(globalTimestamps[Math.floor(globalTimestamps.length/2)]);
+        timelineEnd.innerText = formatTimestamp(globalTimestamps[globalTimestamps.length-1]);
+      } else {
+        timelineStart.innerText = timelineMid.innerText = timelineEnd.innerText = "";
+      }
+
+      // 타임라인 슬라이더 이벤트 (지도 포커싱 포함)
+      timelineSlider.oninput = function(e) {
+        const idx = +timelineSlider.value;
+        timelineLabel.innerText = `${idx+1} / ${maxLen}`;
+        
+        // 타임스탬프 표시
+        if (globalTimestamps[idx]) {
+          timestampLabel.innerText = formatTimestamp(globalTimestamps[idx]);
+        } else {
+          timestampLabel.innerText = "";
+        }
+        
+        // 지도 마커 이동 + 포커싱
+        Object.keys(deviceCarrierMap).forEach(device => {
+          const arr = deviceTracks[device];
+          if (arr && arr[idx]) {
+            markerLayers[device].setLatLng([arr[idx].lat, arr[idx].lng]);
+          }
+        });
+        
+        // 지도 중심을 해당 위치로 이동 (Device1 기준 포커싱)
+        let arr = deviceTracks["Device1"];
+        if (arr && arr[idx]) {
+          map.flyTo([arr[idx].lat, arr[idx].lng], 16, { animate: true, duration: 0.5 });
+        }
+        
+        // 그래프 vertical line 이동
+        ["RSSI","RSRP","RSRQ","SINR"].forEach(metric => {
+          if (chartObjs[metric] && globalTimestamps[idx]) {
+            chartObjs[metric].options.plugins.annotation.annotations.timelineLine.xMin = globalTimestamps[idx];
+            chartObjs[metric].options.plugins.annotation.annotations.timelineLine.xMax = globalTimestamps[idx];
+            chartObjs[metric].update('none');
+          }
+        });
+      };
+      
+      // 최초 위치/그래프 vertical line 동기화
+      timelineSlider.oninput();
+
+      // 재생/정지 버튼
+      playBtn.onclick = function() {
+        playBtn.disabled = true;
+        pauseBtn.disabled = false;
+        let idx = +timelineSlider.value;
+        playTimer = setInterval(() => {
+          if (idx < maxLen-1) {
+            idx++;
+            timelineSlider.value = idx;
+            timelineSlider.oninput();
+          } else {
+            clearInterval(playTimer);
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+          }
+        }, 400); // 0.4초 간격
+      };
+      pauseBtn.onclick = function() {
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+        clearInterval(playTimer);
+      };
+    }
+
+    // 타임스탬프 포맷: YY.MM.DD HH:MM
+    function formatTimestamp(ts) {
+      if (!ts) return "";
+      const d = new Date(ts.replace(/-/g,'/'));
+      const y = (d.getFullYear() % 100).toString().padStart(2,'0');
+      const m = (d.getMonth()+1).toString().padStart(2,'0');
+      const day = d.getDate().toString().padStart(2,'0');
+      const hh = d.getHours().toString().padStart(2,'0');
+      const mm = d.getMinutes().toString().padStart(2,'0');
+      return `${y}.${m}.${day} ${hh}:${mm}`;
+    }
+
+    // y축 min/max 계산 (±10%)
+    function getYAxisRange(allArr, metric) {
+      if (!allArr.length) return {min: 0, max: 1};
+      let min = Math.min(...allArr.map(d => d[metric]));
+      let max = Math.max(...allArr.map(d => d[metric]));
+      let range = max - min;
+      if (range === 0) range = 1;
+      let margin = range * 0.1;
+      return { min: min - margin, max: max + margin };
+    }
+
+    // 등급 밴드(Chart.js annotation) y축 전체 빈틈없이 표시
+    function getBandsForChart(metric, yMin, yMax) {
+      const bands = gradeBands[metric];
+      let bandArr = [];
+      let curMax = yMax;
+      for (let i = 0; i < bands.length; i++) {
+        let band = bands[i];
+        let bandTop = Math.min(curMax, band.max);
+        let bandBot = Math.max(yMin, band.min);
+        if (bandTop > bandBot) {
+          bandArr.push({
+            type: 'box',
+            yMin: bandBot,
+            yMax: bandTop,
+            backgroundColor: band.color + "55",
+            borderWidth: 0,
+          });
+        }
+        curMax = band.min;
+      }
+      return bandArr;
+    }
+
+    // 시계열 그래프 그리기 (x축: 시간, 등급 밴드, 타임라인 vertical line)
+    function drawAllCharts(lteData) {
+      ["RSSI","RSRP","RSRQ","SINR"].forEach(metric => {
+        drawChartForMetric(lteData, metric);
+      });
+    }
+    function drawChartForMetric(lteData, metric) {
+      const ctx = document.getElementById('chart'+metric).getContext('2d');
+      if (chartObjs[metric]) chartObjs[metric].destroy();
+
+      // 모든 디바이스 데이터 합쳐 y축 범위 산정
+      let allArr = [];
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        if (lteData[device] && lteData[device][carrier]) allArr = allArr.concat(lteData[device][carrier]);
+      });
+      const yRange = getYAxisRange(allArr, metric);
+      const yMin = yRange.min, yMax = yRange.max;
+
+      // x축: timestamp
+      let dataLen = 0;
+      let timestamps = [];
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        dataLen = Math.max(dataLen, arr.length);
+        if (device === "Device1") {
+          timestamps = arr.map(d => d.timestamp || "");
+        }
+      });
+
+      const colors = {
+        Device1: 'rgba(49,130,206,0.9)',
+        Device2: 'rgba(72,187,120,0.9)',
+        Device3: 'rgba(237,100,166,0.9)'
+      };
+
+      const datasets = Object.keys(deviceCarrierMap).map(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        return {
+          label: `${device} (${carrier})`,
+          data: arr.map(d => ({x: d.timestamp || "", y: d[metric]})),
+          borderColor: colors[device],
+          backgroundColor: colors[device].replace('0.9','0.15'),
+          pointRadius: 4,
+          pointBackgroundColor: arr.map(d => getGradeColor(metric, d[metric])),
+          pointBorderColor: arr.map(d => getGradeColor(metric, d[metric])),
+          fill: false,
+          tension: 0.2
+        };
+      });
+
+      // 등급 밴드 + 타임라인 vertical line
+      const bandObjs = getBandsForChart(metric, yMin, yMax);
+      const annotations = Object.assign(
+        {timelineLine: {
+          type: 'line',
+          xMin: timestamps[0] || "",
+          xMax: timestamps[0] || "",
+          borderColor: '#e74c3c',
+          borderWidth: 2,
+          label: { content: '타임라인', enabled: true, position: 'start', color: '#e74c3c', backgroundColor:'#fff' }
+        }},
+        ...bandObjs.map((b,i)=>({['band'+i]:b}))
+      );
+
+      chartObjs[metric] = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            annotation: { annotations },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const grade = getSignalGrade(metric, context.raw.y);
+                  return `${context.dataset.label}: ${context.raw.y} (${grade})`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              type: 'time',
+              time: { displayFormats: { minute: 'yy.MM.dd HH:mm' }, tooltipFormat: 'yy.MM.dd HH:mm' },
+              title: { display: true, text: '계측 시간' }
+            },
+            y: {
+              title: { display: true, text: metric },
+              min: yMin,
+              max: yMax
+            }
+          }
+        }
+      });
+    }
+
+    // 신호 등급 분석(평균, 등급별 카운트) + 추천
+    function renderStatsAndRecommend(lteData) {
+      const statArea = document.getElementById('statArea');
+      const recommendBox = document.getElementById('recommendBox');
+      statArea.innerHTML = '';
+      let statTable = {};
+
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        if (arr.length === 0) return;
+        statTable[device] = {};
+        let html = `<h3>${device} (${carrier})</h3>`;
+        html += `<table class="stat-table"><thead>
+          <tr>
+            <th>지표</th>
+            <th>평균값</th>
+            <th class="grade-Excellent">Excellent</th>
+            <th class="grade-Good">Good</th>
+            <th class="grade-Fair">Fair</th>
+            <th class="grade-Poor">Poor</th>
+          </tr>
+        </thead><tbody>`;
+        ["RSSI","RSRP","RSRQ","SINR"].forEach(metric => {
+          let sum = 0, cnt = 0;
+          let gradeCnt = {Excellent:0, Good:0, Fair:0, Poor:0};
+          arr.forEach(d => {
+            const v = d[metric];
+            sum += v;
+            cnt++;
+            gradeCnt[getSignalGrade(metric, v)] += 1;
+          });
+          statTable[device][metric] = gradeCnt;
+          const avg = cnt ? (sum/cnt).toFixed(2) : "-";
+          html += `<tr>
+            <td>${metric}</td>
+            <td>${avg}</td>
+            <td class="grade-Excellent">${gradeCnt.Excellent}</td>
+            <td class="grade-Good">${gradeCnt.Good}</td>
+            <td class="grade-Fair">${gradeCnt.Fair}</td>
+            <td class="grade-Poor">${gradeCnt.Poor}</td>
+          </tr>`;
+        });
+        html += "</tbody></table>";
+        statArea.innerHTML += html;
+      });
+
+      // 추천 기능
+      if (Object.keys(statTable).length > 0) {
+        const rec = recommendDevice(statTable);
+        recommendBox.style.display = "block";
+        recommendBox.innerHTML =
+          `<b>추천 통신망:</b> <span style="color:#007bff">${rec.deviceName}</span><br>
+           <span style="color:#6fcf97;">${rec.reason}</span>`;
+      } else {
+        recommendBox.style.display = "none";
+      }
+    }
+
+    // 추천 알고리즘: Excellent 합산 > Good 합산 > Poor 적은 순
+    function recommendDevice(statTable) {
+      let scores = {};
+      Object.keys(statTable).forEach(device => {
+        let excellentSum = 0, goodSum = 0, poorSum = 0;
+        ["RSSI","RSRP","RSRQ","SINR"].forEach(metric => {
+          excellentSum += statTable[device][metric].Excellent || 0;
+          goodSum += statTable[device][metric].Good || 0;
+          poorSum += statTable[device][metric].Poor || 0;
+        });
+        scores[device] = {excellentSum, goodSum, poorSum};
+      });
+      const sorted = Object.entries(scores).sort((a,b) => {
+        if (b[1].excellentSum !== a[1].excellentSum) return b[1].excellentSum - a[1].excellentSum;
+        if (b[1].goodSum !== a[1].goodSum) return b[1].goodSum - a[1].goodSum;
+        return a[1].poorSum - b[1].poorSum;
+      });
+      const top = sorted[0];
+      let reason = "";
+      if (top[1].excellentSum >= 12) {
+        reason = "4개 신호지표 모두에서 Excellent 비율이 가장 높으므로 이 통신망 사용을 권장합니다.";
+      } else if (top[1].goodSum >= 8) {
+        reason = "Excellent/Good 비율이 높으므로 안정적인 통신 환경을 기대할 수 있습니다.";
+      } else {
+        reason = "Fair/Poor가 많으므로 신호 품질이 다소 불안정할 수 있습니다.";
+      }
+      const deviceName = `${top[0]} (${deviceCarrierMap[top[0]]})`;
+      return {deviceName, reason};
+    }
+  </script>
+</body>
+</html>
