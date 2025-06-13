@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then(function(registration) {
+        console.log('Service Worker 등록 성공:', registration.scope);
+      })
+      .catch(function(error) {
+        console.log('Service Worker 등록 실패:', error);
+      });
+  });
+}
+</script>
 <link rel="manifest" href="manifest.json" />
   <meta charset="UTF-8">
   <title>LTE 신호 분석/경로/타임라인/추천/PDF 뷰어</title>
