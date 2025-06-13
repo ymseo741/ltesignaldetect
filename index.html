@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>LTE 신호 등급/그래프/지도/PDF 통합 리포트</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js Annotation Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
+  <!-- Leaflet.js -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', function() {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+    });
+  </script>
+  <style>
+    body { font-family: 'Noto Sans KR', Arial, sans-serif; margin: 0; background: #f7f7fa; }
+    .container { max-width: 1200px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);}
+    h1 { margin-top: 0; }
+    .upload-section { display: flex; gap: 2rem; margin-bottom: 2rem; }
+    .criteria-table, .stat-table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+    .criteria-table th, .criteria-table td, .stat-table th, .stat-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    .criteria-table th { background: #f8f9fa; }
+    .stat-table th { background: #e8f4fd; }
+    .grade-Excellent { background: #2ecc40; color:#fff; }
+    .grade-Good      { background: #f1c40f; }
+    .grade-Fair      { background: #ff9800; }
+    .grade-Poor      { background: #e74c3c; color:#fff; }
+    .map-section { margin-bottom: 2rem; }
+    #map { width: 100%; height: 400px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .pdf-section { margin-top: 2rem; }
+    .pdf-img-viewer { width: 100%; }
+    .pdf-img-viewer img { display: block; width: 100%; margin-bottom: 24px; background: #fff; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.07);}
+    .chart-section { margin-bottom: 2rem; }
+    .charts-flex { display: flex; flex-wrap: wrap; gap: 2rem; }
+    .chart-block { flex: 1 1 400px; background: #f8fafc; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.03);}
+    .chart-block h3 { margin-top: 0; }
+    @media (max-width: 900px) {
+      .container { padding: 1rem; }
+      #map { height: 250px; }
+      .pdf-img-viewer img { margin-bottom: 12px; }
+      .charts-flex { flex-direction: column; }
+    }
+    @media print {
+      body, html, .container { background: #fff !important; box-shadow: none !important; }
+      .pdf-img-viewer img { page-break-after: always; }
+      #map { display: none !important; }
+      .criteria-table { page-break-inside: avoid; }
+      .chart-section { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>LTE 신호 등급/그래프/지도/PDF 통합 리포트</h1>
+    <section class="upload-section">
+      <div>
+        <label for="jsonFile"><b>LTE 신호 JSON 업로드</b></label><br>
+        <input type="file" id="jsonFile" accept=".json">
+      </div>
+      <div>
+        <label for="pdfFile"><b>RF Explorer PDF 업로드</b></label><br>
+        <input type="file" id="pdfFile" accept="application/pdf">
+      </div>
+    </section>
+    <section class="map-section">
+      <h2>지도에서 위치/신호 등급 보기</h2>
+      <div id="map"></div>
+    </section>
+    <section class="chart-section">
+      <h2>지표별 시계열 그래프 (Device1-KT, Device2-SKT, Device3-U+)</h2>
+      <div class="charts-flex" id="chartsFlex">
+        <div class="chart-block">
+          <h3>RSSI</h3>
+          <canvas id="chartRSSI" height="200"></canvas>
+        </div>
+        <div class="chart-block">
+          <h3>RSRP</h3>
+          <canvas id="chartRSRP" height="200"></canvas>
+        </div>
+        <div class="chart-block">
+          <h3>SINR</h3>
+          <canvas id="chartSINR" height="200"></canvas>
+        </div>
+        <div class="chart-block">
+          <h3>RSRQ</h3>
+          <canvas id="chartRSRQ" height="200"></canvas>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>디바이스별 신호 통계 (캐리어 1:1 매칭)</h2>
+      <div id="statArea"></div>
+    </section>
+    <section>
+      <h2>신호 등급 기준표 (정률적 구간)</h2>
+      <table class="criteria-table">
+        <thead>
+          <tr>
+            <th>등급</th>
+            <th>RSSI (dBm)</th>
+            <th>RSRP (dBm)</th>
+            <th>SINR (dB)</th>
+            <th>RSRQ (dB)</th>
+            <th>색상</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Excellent</td>
+            <td>-75 ~ 0</td>
+            <td>-75 ~ 0</td>
+            <td>18 ~ 24</td>
+            <td>-5 ~ 0</td>
+            <td class="grade-Excellent"></td>
+          </tr>
+          <tr>
+            <td>Good</td>
+            <td>-75 ~ -80</td>
+            <td>-75 ~ -80</td>
+            <td>12 ~ 18</td>
+            <td>-10 ~ -5</td>
+            <td class="grade-Good"></td>
+          </tr>
+          <tr>
+            <td>Fair</td>
+            <td>-80 ~ -90</td>
+            <td>-80 ~ -90</td>
+            <td>6 ~ 12</td>
+            <td>-15 ~ -10</td>
+            <td class="grade-Fair"></td>
+          </tr>
+          <tr>
+            <td>Poor</td>
+            <td>-100 ~ -90</td>
+            <td>-100 ~ -90</td>
+            <td>0 ~ 6</td>
+            <td>-20 ~ -15</td>
+            <td class="grade-Poor"></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="pdf-section">
+      <h2>RF Explorer PDF 리포트 (전체 페이지 연속 보기, 인쇄 지원)</h2>
+      <div class="pdf-img-viewer" id="pdfImgViewer"></div>
+    </section>
+  </div>
+  <script>
+    // 등급 기준 (정률적 구간, 겹치지 않음)
+    const gradeRanges = {
+      RSSI: [
+        { grade: "Excellent", min: -75, max: 0, color: "#2ecc40" },
+        { grade: "Good",      min: -80, max: -75, color: "#f1c40f" },
+        { grade: "Fair",      min: -90, max: -80, color: "#ff9800" },
+        { grade: "Poor",      min: -100, max: -90, color: "#e74c3c" }
+      ],
+      RSRP: [
+        { grade: "Excellent", min: -75, max: 0, color: "#2ecc40" },
+        { grade: "Good",      min: -80, max: -75, color: "#f1c40f" },
+        { grade: "Fair",      min: -90, max: -80, color: "#ff9800" },
+        { grade: "Poor",      min: -100, max: -90, color: "#e74c3c" }
+      ],
+      SINR: [
+        { grade: "Excellent", min: 18, max: 24, color: "#2ecc40" },
+        { grade: "Good",      min: 12, max: 18, color: "#f1c40f" },
+        { grade: "Fair",      min: 6, max: 12, color: "#ff9800" },
+        { grade: "Poor",      min: 0, max: 6, color: "#e74c3c" }
+      ],
+      RSRQ: [
+        { grade: "Excellent", min: -5, max: 0, color: "#2ecc40" },
+        { grade: "Good",      min: -10, max: -5, color: "#f1c40f" },
+        { grade: "Fair",      min: -15, max: -10, color: "#ff9800" },
+        { grade: "Poor",      min: -20, max: -15, color: "#e74c3c" }
+      ]
+    };
+
+    // 디바이스-캐리어 1:1 매칭
+    const deviceCarrierMap = {
+      Device1: "KT",
+      Device2: "SKT",
+      Device3: "U+"
+    };
+
+    // 정률적 구간 비교 (겹치지 않음)
+    function getSignalGrade(metric, value) {
+      if (metric === "SINR") {
+        if (value >= 18) return "Excellent";
+        if (value >= 12) return "Good";
+        if (value >= 6) return "Fair";
+        return "Poor";
+      } else if (metric === "RSSI") {
+        if (value >= -75) return "Excellent";
+        if (value >= -80) return "Good";
+        if (value >= -90) return "Fair";
+        return "Poor";
+      } else if (metric === "RSRP") {
+        if (value >= -75) return "Excellent";
+        if (value >= -80) return "Good";
+        if (value >= -90) return "Fair";
+        return "Poor";
+      } else if (metric === "RSRQ") {
+        if (value >= -5) return "Excellent";
+        if (value >= -10) return "Good";
+        if (value >= -15) return "Fair";
+        return "Poor";
+      }
+      return "Unknown";
+    }
+    function getGradeColor(metric, value) {
+      for (const r of gradeRanges[metric]) {
+        if (metric === "SINR") {
+          if (value >= r.min && value < r.max) return r.color;
+          if (r.grade === "Excellent" && value >= r.min) return r.color;
+        } else {
+          if (value >= r.min && value < r.max) return r.color;
+          if (r.grade === "Excellent" && value >= r.min) return r.color;
+        }
+      }
+      return "#888";
+    }
+
+    // 지도 초기화
+    let map = L.map('map').setView([34.9481, 127.4866], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    let markerGroup = L.layerGroup().addTo(map);
+
+    // Chart.js 객체 저장
+    let chartObjs = {};
+
+    document.getElementById('jsonFile').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const lteData = JSON.parse(evt.target.result);
+          renderStats(lteData);
+          drawMapMarkers(lteData);
+          drawAllCharts(lteData);
+        } catch (err) {
+          alert('JSON 파일 파싱 오류');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function renderStats(lteData) {
+      const statArea = document.getElementById('statArea');
+      statArea.innerHTML = '';
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        if (arr.length === 0) return;
+        let html = `<h3>${device} (${carrier})</h3>`;
+        html += `<table class="stat-table"><thead>
+          <tr>
+            <th>지표</th>
+            <th>평균값</th>
+            <th>Excellent</th>
+            <th>Good</th>
+            <th>Fair</th>
+            <th>Poor</th>
+          </tr>
+        </thead><tbody>`;
+        ["RSSI","RSRP","SINR","RSRQ"].forEach(metric => {
+          let sum = 0, cnt = 0;
+          let gradeCnt = {Excellent:0, Good:0, Fair:0, Poor:0};
+          arr.forEach(d => {
+            const v = d[metric];
+            sum += v;
+            cnt++;
+            gradeCnt[getSignalGrade(metric, v)] += 1;
+          });
+          const avg = cnt ? (sum/cnt).toFixed(2) : "-";
+          html += `<tr>
+            <td>${metric}</td>
+            <td>${avg}</td>
+            <td class="grade-Excellent">${gradeCnt.Excellent}</td>
+            <td class="grade-Good">${gradeCnt.Good}</td>
+            <td class="grade-Fair">${gradeCnt.Fair}</td>
+            <td class="grade-Poor">${gradeCnt.Poor}</td>
+          </tr>`;
+        });
+        html += "</tbody></table>";
+        statArea.innerHTML += html;
+      });
+    }
+
+    // 지도 마커 표시(각 디바이스-캐리어 매칭의 모든 데이터)
+    function drawMapMarkers(lteData) {
+      markerGroup.clearLayers();
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        arr.forEach((d, idx) => {
+          // RSSI 등급 색상으로 마커
+          const color = getGradeColor("RSSI", d.RSSI);
+          const popup = `<b>${device} (${carrier}) #${idx+1}</b><br>
+            RSSI: ${d.RSSI} (${getSignalGrade("RSSI", d.RSSI)})<br>
+            RSRP: ${d.RSRP} (${getSignalGrade("RSRP", d.RSRP)})<br>
+            SINR: ${d.SINR} (${getSignalGrade("SINR", d.SINR)})<br>
+            RSRQ: ${d.RSRQ} (${getSignalGrade("RSRQ", d.RSRQ)})<br>
+            위도: ${d.lat}<br>
+            경도: ${d.lng}`;
+          const marker = L.circleMarker([d.lat, d.lng], {
+            radius: 7,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.8
+          }).bindPopup(popup);
+          markerGroup.addLayer(marker);
+        });
+      });
+      // 첫 데이터로 지도 중심 이동
+      for (const device in deviceCarrierMap) {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        if (arr.length > 0) {
+          map.setView([arr[0].lat, arr[0].lng], 14);
+          break;
+        }
+      }
+    }
+
+    // 시계열 그래프 그리기 (네 지표, 등급 밴드 표시)
+    function drawAllCharts(lteData) {
+      const metrics = ["RSSI","RSRP","SINR","RSRQ"];
+      metrics.forEach(metric => {
+        drawChartForMetric(lteData, metric);
+      });
+    }
+    function drawChartForMetric(lteData, metric) {
+      const ctx = document.getElementById('chart'+metric).getContext('2d');
+      // 기존 차트 제거
+      if (chartObjs[metric]) chartObjs[metric].destroy();
+
+      const labels = [];
+      let dataLen = 0;
+      Object.keys(deviceCarrierMap).forEach(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        dataLen = Math.max(dataLen, arr.length);
+      });
+      for (let i = 0; i < dataLen; i++) labels.push(`${i+1}`);
+
+      const colors = {
+        Device1: 'rgba(49,130,206,0.9)', // 파랑
+        Device2: 'rgba(72,187,120,0.9)', // 녹색
+        Device3: 'rgba(237,100,166,0.9)' // 분홍
+      };
+
+      const datasets = Object.keys(deviceCarrierMap).map(device => {
+        const carrier = deviceCarrierMap[device];
+        const arr = (lteData[device] && lteData[device][carrier]) ? lteData[device][carrier] : [];
+        const values = arr.map(d => d[metric]);
+        const pointColors = arr.map(d => getGradeColor(metric, d[metric]));
+        return {
+          label: `${device} (${carrier})`,
+          data: values,
+          borderColor: colors[device],
+          backgroundColor: colors[device].replace('0.9','0.15'),
+          pointRadius: 4,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          fill: false,
+          tension: 0.2
+        };
+      });
+
+      // 등급 밴드(Chart.js annotation plugin)
+      const annotations = {};
+      gradeRanges[metric].forEach((grade, idx) => {
+        let yMin = grade.min, yMax = grade.max;
+        annotations['band'+idx] = {
+          type: 'box',
+          yMin: yMin,
+          yMax: yMax,
+          backgroundColor: grade.color + "22",
+          borderWidth: 0,
+        };
+      });
+
+      chartObjs[metric] = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            annotation: { annotations },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const grade = getSignalGrade(metric, context.raw);
+                  return `${context.dataset.label}: ${context.raw} (${grade})`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: '측정 순번' } },
+            y: { title: { display: true, text: metric } }
+          }
+        }
+      });
+    }
+
+    // PDF 파일 업로드 및 각 페이지를 이미지로 변환해 연속 삽입(스크롤/인쇄 최적화)
+    document.getElementById('pdfFile').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.type !== "application/pdf") {
+        alert("PDF 파일만 업로드 가능합니다.");
+        return;
+      }
+      const fileReader = new FileReader();
+      fileReader.onload = function() {
+        renderPdfAsImages(new Uint8Array(fileReader.result));
+      };
+      fileReader.readAsArrayBuffer(file);
+    });
+
+    function renderPdfAsImages(pdfData) {
+      const container = document.getElementById('pdfImgViewer');
+      container.innerHTML = '<p style="text-align:center; color:#888;">PDF 변환 중...</p>';
+      pdfjsLib.getDocument({data: pdfData}).promise.then(function(pdf) {
+        container.innerHTML = '';
+        (async function() {
+          for (let i = 1; i <= pdf.numPages; i++) {
+            await pdf.getPage(i).then(function(page) {
+              const viewport = page.getViewport({scale: 1.2});
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const context = canvas.getContext('2d');
+              return page.render({canvasContext: context, viewport: viewport}).promise.then(function() {
+                const img = document.createElement('img');
+                img.src = canvas.toDataURL('image/jpeg', 1.0);
+                container.appendChild(img);
+              });
+            });
+          }
+        })();
+      }).catch(function(err) {
+        container.innerHTML = '<p style="text-align:center; color:#e53e3e;">PDF 파일을 불러올 수 없습니다.<br>' + err + '</p>';
+      });
+    }
+  </script>
+</body>
+</html>
