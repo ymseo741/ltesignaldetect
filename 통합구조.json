@@ -1,0 +1,70 @@
+{
+  "data": [
+    {
+      "device_id": "Device1",
+      "carrier": "KT",
+      "RSSI": -62.72,
+      "RSRP": -79.73,
+      "SINR": 17.68,
+      "RSRQ": -5.24,
+      "lat": 34.9481,
+      "lng": 127.4866,
+      "timestamp": "2025-06-13 15:46:49"
+    },
+    {
+      "device_id": "Device1",
+      "carrier": "KT",
+      "RSSI": -58.89,
+      "RSRP": -81.08,
+      "SINR": 19.18,
+      "RSRQ": -3.26,
+      "lat": 34.948157,
+      "lng": 127.4879022,
+      "timestamp": "2025-06-13 16:16:49"
+    },
+    {
+      "device_id": "Device2",
+      "carrier": "SKT",
+      "RSSI": -81.57,
+      "RSRP": -109.66,
+      "SINR": 5.67,
+      "RSRQ": -9.67,
+      "lat": 34.9481,
+      "lng": 127.4866,
+      "timestamp": "2025-06-13 15:46:49"
+    },
+    {
+      "device_id": "Device2",
+      "carrier": "SKT",
+      "RSSI": -67.1,
+      "RSRP": -95.08,
+      "SINR": 11.56,
+      "RSRQ": -8.61,
+      "lat": 34.948157,
+      "lng": 127.4879022,
+      "timestamp": "2025-06-13 16:16:49"
+    },
+    {
+      "device_id": "Device3",
+      "carrier": "U+",
+      "RSSI": -69.59,
+      "RSRP": -93.97,
+      "SINR": 13.77,
+      "RSRQ": -9.84,
+      "lat": 34.9481,
+      "lng": 127.4866,
+      "timestamp": "2025-06-13 15:46:49"
+    },
+    {
+      "device_id": "Device3",
+      "carrier": "U+",
+      "RSSI": -78.61,
+      "RSRP": -105.29,
+      "SINR": 11.09,
+      "RSRQ": -12.45,
+      "lat": 34.948157,
+      "lng": 127.4879022,
+      "timestamp": "2025-06-13 16:16:49"
+    }
+  ]
+}
