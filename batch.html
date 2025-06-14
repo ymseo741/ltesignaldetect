@@ -1,107 +1,196 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>JSON 배치 샘플링(간격별 대표값 추출) 및 파일명 자동 변환</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: 'Noto Sans KR', Arial, sans-serif; background: #f7f7fa; }
-    .container { max-width: 600px; margin: 2rem auto; padding: 2rem; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);}
-    h1 { margin-top: 0; }
-    .row { margin-bottom: 1.5rem; }
-    label { font-weight: bold; }
-    .btn { padding: 0.5em 1.5em; background: #2ecc40; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
-    .btn:disabled { background: #bbb; }
-    .result { margin-top: 1.5rem; }
-    .file-link { display: block; margin-bottom: 0.5rem; }
-  </style>
+    <meta charset="UTF-8">
+    <title>JSON 배치 샘플링(YYYY-MM-DD hh:mm:ss 기반)</title>
+    <style>
+        body { font-family: 'Noto Sans KR', Arial, sans-serif; background: #f8f9fa; padding: 2em; }
+        .section { background: #fff; border-radius: 8px; padding: 2em; margin-bottom: 2em; box-shadow: 0 2px 8px rgba(0,0,0,0.04);}
+        label { font-weight: bold; }
+        select, input[type="file"], button { margin: 0.5em 0; padding: 0.4em 1em; }
+        #result { margin-top: 1.5em; color: #1976d2; }
+        #error { color: #d32f2f; margin-top: 1em; }
+        .info { color: #666; font-size: 0.97em; margin-bottom: 1.2em; }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>JSON 배치 샘플링 및 파일명 자동 변환</h1>
-    <div class="row">
-      <label>배치 샘플링 간격(분):</label>
-      <select id="intervalSelect">
-        <option value="1">1분</option>
-        <option value="5">5분</option>
-        <option value="10">10분</option>
-        <option value="30">30분</option>
-        <option value="60">60분</option>
-      </select>
+    <div class="section">
+        <h2>JSON 배치 샘플링(YYYY-MM-DD hh:mm:ss 기반)</h2>
+        <div class="info">
+            - timestamp가 "YYYY-MM-DD hh:mm:ss" 형식임을 가정<br>
+            - <b>분 단위(1,5,10,20,30,60)로 구간 쪼개기, 각 구간의 첫 데이터만 남김</b><br>
+            - 각 샘플에 device_id, carrier 필드가 반드시 포함<br>
+            - 계층/통합 구조 모두 지원, 결과는 계층형 구조 하나의 JSON 파일로 다운로드
+        </div>
+        <label>배치 샘플링 간격(분):</label>
+        <select id="interval">
+            <option value="1">1분</option>
+            <option value="5">5분</option>
+            <option value="10" selected>10분</option>
+            <option value="20">20분</option>
+            <option value="30">30분</option>
+            <option value="60">60분</option>
+        </select>
+        <br>
+        <label>JSON 파일 업로드:</label>
+        <input type="file" id="jsonFileInput" accept=".json" />
+        <br>
+        <label>출력 파일명:</label>
+        <input type="text" id="outputName" value="batched_lte_signal_data" style="width:220px;" />
+        <br>
+        <button id="processBtn">배치 샘플링 및 파일명 변환 저장</button>
+        <div id="result"></div>
+        <div id="error"></div>
     </div>
-    <div class="row">
-      <label>JSON 파일 업로드:</label>
-      <input type="file" id="jsonFile" accept=".json">
-    </div>
-    <div class="row">
-      <button class="btn" id="processBtn" disabled>배치 샘플링 및 파일명 변환 저장</button>
-    </div>
-    <div class="result" id="resultArea"></div>
-  </div>
-  <script>
-    let jsonData = null;
-    let fileName = "";
-
-    document.getElementById('jsonFile').addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      fileName = file.name.replace(/\.json$/i, "");
-      const reader = new FileReader();
-      reader.onload = function(evt) {
-        try {
-          jsonData = JSON.parse(evt.target.result);
-          document.getElementById('processBtn').disabled = false;
-        } catch (err) {
-          alert('JSON 파일 파싱 오류: ' + err.message);
-          jsonData = null;
-          document.getElementById('processBtn').disabled = true;
-        }
-      };
-      reader.readAsText(file);
-    });
-
-    document.getElementById('processBtn').addEventListener('click', function() {
-      if (!jsonData) return;
-      const intervalMin = parseInt(document.getElementById('intervalSelect').value, 10);
-      const sampledData = batchSample(jsonData, intervalMin);
-      const resultArea = document.getElementById('resultArea');
-      resultArea.innerHTML = "";
-      const blob = new Blob([JSON.stringify(sampledData, null, 2)], {type: "application/json"});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${fileName}_${intervalMin}min_sampled.json`;
-      a.textContent = `저장: ${fileName}_${intervalMin}min_sampled.json`;
-      a.className = "file-link";
-      resultArea.appendChild(a);
-      if (Object.keys(sampledData).length === 0) {
-        resultArea.innerHTML = "<span style='color:#e74c3c;'>데이터가 없습니다.</span>";
-      }
-    });
-
-    // 각 디바이스/캐리어별로 intervalMin 단위로 대표값(첫 데이터)만 남김
-    function batchSample(data, intervalMin) {
-      let result = {};
-      Object.keys(data).forEach(device => {
-        result[device] = {};
-        Object.keys(data[device]).forEach(carrier => {
-          const arr = (data[device][carrier] || []).slice();
-          // timestamp 순 정렬
-          arr.sort((a,b) => new Date(a.timestamp.replace(/-/g,'/')) - new Date(b.timestamp.replace(/-/g,'/')));
-          let sampled = [];
-          let lastTime = null;
-          for (let i = 0; i < arr.length; i++) {
-            const t = new Date(arr[i].timestamp.replace(/-/g,'/'));
-            if (!lastTime || (t - lastTime) >= intervalMin*60*1000) {
-              sampled.push(arr[i]);
-              lastTime = t;
-            }
-          }
-          result[device][carrier] = sampled;
-        });
-      });
-      return result;
+    <script>
+    // "YYYY-MM-DD hh:mm:ss" → Date 객체
+    function parseTimestamp(ts) {
+        // Safari 호환 위해 "YYYY-MM-DDTHH:mm:ss"로 변환
+        return new Date(ts.replace(" ", "T"));
     }
-  </script>
+    // 계층(nested) → flat 변환 (device_id/carrier 상속)
+    function nestedToFlatWithInheritance(obj) {
+        let arr = [];
+        if (Array.isArray(obj)) {
+            obj.forEach(item => arr.push(item));
+        } else if (typeof obj === "object" && obj !== null) {
+            for (const dev in obj) {
+                if (typeof obj[dev] !== "object" || obj[dev] === null) continue;
+                for (const car in obj[dev]) {
+                    if (!Array.isArray(obj[dev][car])) continue;
+                    obj[dev][car].forEach(sample => {
+                        arr.push({
+                            device_id: dev,
+                            carrier: car,
+                            ...sample
+                        });
+                    });
+                }
+            }
+        }
+        return arr;
+    }
+    // 통합(flat) → 계층(nested) 구조 변환 (샘플에 device_id/carrier 포함)
+    function flatToNested(flatArr) {
+        const result = {};
+        flatArr.forEach(item => {
+            const device = item.device_id || 'UnknownDevice';
+            const carrier = item.carrier || 'UnknownCarrier';
+            if (!result[device]) result[device] = {};
+            if (!result[device][carrier]) result[device][carrier] = [];
+            // 반드시 device_id, carrier 포함
+            const sampleWithIds = { ...item, device_id: device, carrier: carrier };
+            result[device][carrier].push(sampleWithIds);
+        });
+        return result;
+    }
+    // 구조 자동 판별 및 flat array로 변환 (계층형은 device/carrier 상속)
+    function getFlatArrayFromAnyJson(json) {
+        if (Array.isArray(json.data)) return json.data;
+        if (Array.isArray(json)) return json;
+        return nestedToFlatWithInheritance(json);
+    }
+    // 디바이스/통신사별로 그룹화
+    function groupByDeviceCarrier(flatArr) {
+        const group = {};
+        flatArr.forEach(item => {
+            const device = item.device_id || 'UnknownDevice';
+            const carrier = item.carrier || 'UnknownCarrier';
+            if (!group[device]) group[device] = {};
+            if (!group[device][carrier]) group[device][carrier] = [];
+            group[device][carrier].push(item);
+        });
+        return group;
+    }
+    // "YYYY-MM-DD hh:mm:ss" → "YYYY-MM-DD HH:mm" (intervalMin 단위 내림)
+    function getBatchKey(ts, intervalMin) {
+        const d = parseTimestamp(ts);
+        const y = d.getFullYear();
+        const m = String(d.getMonth()+1).padStart(2,'0');
+        const day = String(d.getDate()).padStart(2,'0');
+        const h = String(d.getHours()).padStart(2,'0');
+        const min = d.getMinutes();
+        const minFloor = Math.floor(min / intervalMin) * intervalMin;
+        const minStr = String(minFloor).padStart(2,'0');
+        return `${y}-${m}-${day} ${h}:${minStr}`;
+    }
+    // 시간정렬, 구간별 첫 데이터만 추출
+    function batchSamplingByGroupFirst(flatArr, intervalMin) {
+        const grouped = groupByDeviceCarrier(flatArr);
+        const result = [];
+        for (const device in grouped) {
+            for (const carrier in grouped[device]) {
+                // 1. 시간순 정렬
+                let arr = grouped[device][carrier].slice().sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp));
+                let seenBatchKeys = new Set();
+                for (let i = 0; i < arr.length; i++) {
+                    const cur = arr[i];
+                    const batchKey = getBatchKey(cur.timestamp, intervalMin);
+                    if (!seenBatchKeys.has(batchKey)) {
+                        result.push({
+                            ...cur,
+                            device_id: device,
+                            carrier: carrier
+                        });
+                        seenBatchKeys.add(batchKey);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+    function downloadJson(obj, filename) {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename.endsWith('.json') ? filename : filename + '.json';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+    }
+    document.getElementById('processBtn').onclick = function() {
+        const fileInput = document.getElementById('jsonFileInput');
+        const interval = parseInt(document.getElementById('interval').value, 10);
+        const outputName = document.getElementById('outputName').value.trim() || 'batched_lte_signal_data';
+        const resultDiv = document.getElementById('result');
+        const errorDiv = document.getElementById('error');
+        resultDiv.innerHTML = '';
+        errorDiv.innerHTML = '';
+        if (!fileInput.files[0]) {
+            errorDiv.textContent = 'JSON 파일을 선택하세요.';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                let json = JSON.parse(e.target.result);
+                let flatArr = getFlatArrayFromAnyJson(json);
+                flatArr = flatArr.map(item => ({
+                    device_id: item.device_id,
+                    carrier: item.carrier,
+                    ...item
+                }));
+                if (!Array.isArray(flatArr) || !flatArr.length) throw new Error('데이터가 비어있거나 올바르지 않습니다.');
+                // 시간정렬 + 구간별 첫 데이터만 추출
+                const batchedArr = batchSamplingByGroupFirst(flatArr, interval);
+                // 계층 구조로 합침 (샘플에 device_id/carrier 포함)
+                const nested = flatToNested(batchedArr);
+                // 파일명에 _{interval}min_batch 추가
+                const now = new Date();
+                const ymd = now.toISOString().slice(0,10).replace(/-/g,'');
+                const outFile = `${outputName}_${interval}min_batch_${ymd}.json`;
+                downloadJson(nested, outFile);
+                resultDiv.innerHTML = `<b>변환 및 저장 완료!</b><br>샘플링: <b>${interval}분</b> / 샘플 수: <b>${batchedArr.length}</b><br>파일명: <b>${outFile}</b>`;
+            } catch (err) {
+                errorDiv.textContent = '변환 오류: ' + err.message;
+            }
+        };
+        reader.readAsText(fileInput.files[0], 'utf-8');
+    };
+    </script>
 </body>
 </html>
